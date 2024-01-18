@@ -53,12 +53,6 @@ function EnumAccountPrivileges(const ComputerName, AccountName: string;
 function TestAccountPrivileges(const ComputerName, AccountName: string;
   var Privileges: TStringArray; out HasPrivileges: Boolean): DWORD;
 
-// Adds a privilege if not set
-function AddAccountPrivilege(const ComputerName, AccountName, Privilege: string): DWORD;
-
-// Removes a privilege if set
-function RemoveAccountPrivilege(const ComputerName, AccountName, Privilege: string): DWORD;
-
 // Enumerates accounts with a specified privilege or right
 function EnumPrivilegeAccounts(ComputerName, PrivilegeName: string;
   out Accounts: TStringArray): DWORD;
@@ -142,7 +136,7 @@ type
     SeCreatePermanentPrivilege,                 // Create permanent shared objects
     SeCreateSymbolicLinkPrivilege,              // Create symbolic links
     SeDebugPrivilege,                           // Debug programs
-    SeDenyNetworkLogonRight,                    // Deny access this computer from the network
+    SeDenyNetworkLogonRight,                    // Deny access to this computer from the network
     SeDenyBatchLogonRight,                      // Deny log on as a batch job
     SeDenyServiceLogonRight,                    // Deny log on as a service
     SeDenyInteractiveLogonRight,                // Deny log on locally
@@ -390,7 +384,7 @@ begin
     'secreatepermanentprivilege':                 PrivilegeDisplayName := 'Create permanent shared objects';
     'secreatesymboliclinkprivilege':              PrivilegeDisplayName := 'Create symbolic links';
     'sedebugprivilege':                           PrivilegeDisplayName := 'Debug programs';
-    'sedenynetworklogonright':                    PrivilegeDisplayName := 'Deny access this computer from the network';
+    'sedenynetworklogonright':                    PrivilegeDisplayName := 'Deny access to this computer from the network';
     'sedenybatchlogonright':                      PrivilegeDisplayName := 'Deny log on as a batch job';
     'sedenyservicelogonright':                    PrivilegeDisplayName := 'Deny log on as a service';
     'sedenyinteractivelogonright':                PrivilegeDisplayName := 'Deny log on locally';
@@ -734,32 +728,6 @@ begin
     end;
   end;
   HasPrivileges := NumMatches = Length(Privileges);
-end;
-
-function AddAccountPrivilege(const ComputerName, AccountName, Privilege: string): DWORD;
-var
-  Privileges: TStringArray;
-  HasPrivilege: Boolean;
-begin
-  SetLength(Privileges, 1);
-  Privileges[0] := Privilege;
-  result := TestAccountPrivileges(ComputerName, AccountName, Privileges, HasPrivilege);
-  if (result <> 0) or HasPrivilege then
-    exit;
-  result := AddAccountPrivileges(ComputerName, AccountName, Privileges);
-end;
-
-function RemoveAccountPrivilege(const ComputerName, AccountName, Privilege: string): DWORD;
-var
-  Privileges: TStringArray;
-  HasPrivilege: Boolean;
-begin
-  SetLength(Privileges, 1);
-  Privileges[0] := Privilege;
-  result := TestAccountPrivileges(ComputerName, AccountName, Privileges, HasPrivilege);
-  if (result <> 0) or (not HasPrivilege) then
-    exit;
-  result := RemoveAccountPrivileges(ComputerName, AccountName, Privileges);
 end;
 
 function EnumPrivilegeAccounts(ComputerName, PrivilegeName: string;

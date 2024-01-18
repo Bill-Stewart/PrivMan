@@ -15,10 +15,10 @@
 
 }
 
+unit WindowsMessages;
+
 {$MODE OBJFPC}
 {$MODESWITCH UNICODESTRINGS}
-
-unit WindowsMessages;
 
 interface
 
