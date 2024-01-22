@@ -32,8 +32,7 @@ uses
   windows,
   wargcv,
   wgetopts,
-  FileUtil,
-  StringUtil,
+  MiscUtil,
   WindowsMessages,
   WindowsPrivileges;
 
@@ -59,6 +58,7 @@ type
     ParamSet: TParamSet;
     Error: DWORD;
     Quiet: Boolean;
+    ComputerName: string;
     Account: string;
     Privilege: string;
     PrivilegeDisplayName: string;
@@ -78,20 +78,20 @@ begin
   WriteLn();
   WriteLn('USAGE');
   WriteLn();
-  WriteLn(PROGRAM_NAME, ' -a <account> [-g|-r] "<privileges>" [-q]');
+  WriteLn(PROGRAM_NAME, ' -a <account> [-g|-r] "<privileges>" [-c computername] [-q]');
   WriteLn('Grants (-g) or revokes (-r) specified privileges/rights');
   WriteLn();
-  WriteLn(PROGRAM_NAME, ' -a <account> --revokeall [-q]');
+  WriteLn(PROGRAM_NAME, ' -a <account> --revokeall [-c computername] [-q]');
   WriteLn('Revokes all privileges/rights from account - USE WITH CAUTION');
   WriteLn();
-  WriteLn(PROGRAM_NAME, ' -a <account> -t "<privileges>" [-q]');
+  WriteLn(PROGRAM_NAME, ' -a <account> -t "<privileges>" [-c computername] [-q]');
   WriteLn('Tests if account has all specified privileges/rights');
   WriteLn('Returns 0 for NO or 1 for YES; any other exit code is an error');
   WriteLn();
-  WriteLn(PROGRAM_NAME, ' -a <account> --list [-q]');
+  WriteLn(PROGRAM_NAME, ' -a <account> --list [-c computername] [-q]');
   WriteLn('Lists an account''s privileges/rights');
   WriteLn();
-  WriteLn(PROGRAM_NAME, ' --privilegeaccounts <privilege> [-q]');
+  WriteLn(PROGRAM_NAME, ' --privilegeaccounts <privilege> [-c computername] [-q]');
   WriteLn('Lists all accounts with specified privilege/right');
   WriteLn();
   WriteLn(PROGRAM_NAME, ' --displayname <privilege> [-q]');
@@ -100,13 +100,14 @@ begin
   WriteLn(PROGRAM_NAME, ' --listall');
   WriteLn('Outputs comma-delimited (CSV) list of all privileges/rights');
   WriteLn();
-  WriteLn(PROGRAM_NAME, ' --csvreport');
+  WriteLn(PROGRAM_NAME, ' --csvreport [-c computername]');
   WriteLn('Outputs comma-delimited list of all accounts, privileges, and display names');
   WriteLn();
   WriteLn('COMMENTS');
   WriteLn('* <account> : User or group name, in ''authority\name'' format');
   WriteLn('* <account> can also be specified as a SID (e.g., S-1-5-32-544)');
   WriteLn('* <privileges> : List of privileges/rights, separated by spaces');
+  WriteLn('* -c parameter specifies a remote computer');
   WriteLn('* -q parameter suppresses status and error messages');
   WriteLn('* Elevation (run as administrator) required for most options');
   WriteLn('* Non-zero exit code other than 1 indicates an error');
@@ -121,7 +122,7 @@ begin
   StrSplit(Arg, ' ', Privs);
   for I := 0 to Length(Privs) - 1 do
   begin
-    result := GetPrivilegeName(Privs[I], Priv);
+    result := GetPrivilegeName(Trim(Privs[I]), Priv);
     if result <> 0 then
       exit;
     Privs[I] := Priv;
@@ -130,7 +131,7 @@ end;
 
 procedure TCommandLine.Parse();
 var
-  Opts: array[1..13] of TOption;
+  Opts: array[1..14] of TOption;
   Opt: Char;
   I: Integer;
 begin
@@ -143,82 +144,89 @@ begin
   end;
   with Opts[2] do
   begin
+    Name := 'computername';
+    Has_arg := Required_Argument;
+    Flag := nil;
+    Value := 'c';
+  end;
+  with Opts[3] do
+  begin
     Name := 'csvreport';
     Has_arg := No_Argument;
     Flag := nil;
     value := #0;
   end;
-  with Opts[3] do
+  with Opts[4] do
   begin
     Name := 'displayname';
     Has_arg := Required_Argument;
     Flag := nil;
     Value := 'd';
   end;
-  with Opts[4] do
+  with Opts[5] do
   begin
     Name := 'grant';
     Has_arg := Required_Argument;
     Flag := nil;
     Value := 'g';
   end;
-  with Opts[5] do
+  with Opts[6] do
   begin
     Name := 'help';
     Has_arg := No_Argument;
     Flag := nil;
     Value := 'h';
   end;
-  with Opts[6] do
+  with Opts[7] do
   begin
     Name := 'list';
     Has_arg := No_Argument;
     Flag := nil;
     Value := 'l';
   end;
-  with Opts[7] do
+  with Opts[8] do
   begin
     Name := 'listall';
     Has_arg := No_Argument;
     Flag := nil;
     Value := #0;
   end;
-  with Opts[8] do
+  with Opts[9] do
   begin
     Name := 'privilegeaccounts';
     Has_arg := Required_Argument;
     Flag := nil;
     Value := 'p';
   end;
-  with Opts[9] do
+  with Opts[10] do
   begin
     Name := 'quiet';
     Has_arg := No_Argument;
     Flag := nil;
     Value := 'q';
   end;
-  with Opts[10] do
+  with Opts[11] do
   begin
     Name := 'revoke';
     Has_arg := Required_Argument;
     Flag := nil;
     Value := 'r';
   end;
-  with Opts[11] do
+  with Opts[12] do
   begin
     Name := 'revokeall';
     Has_arg := No_Argument;
     Flag := nil;
     Value := #0;
   end;
-  with Opts[12] do
+  with Opts[13] do
   begin
     Name := 'test';
     Has_arg := Required_Argument;
     Flag := nil;
     Value := 't';
   end;
-  with Opts[13] do
+  with Opts[14] do
   begin
     Name := '';
     Has_arg := No_Argument;
@@ -228,17 +236,24 @@ begin
   ParamSet := [];
   Error := ERROR_SUCCESS;
   Account := '';
+  GetComputerName(ComputerNameNetBIOS, ComputerName);
   SetLength(Privileges, 0);
   Privilege := '';
   Quiet := false;
   OptErr := false;
   repeat
-    Opt := GetLongOpts('a:d:g:hlp:qr:t:', @Opts[1], I);
+    Opt := GetLongOpts('a:c:d:g:hlp:qr:t:', @Opts[1], I);
     case Opt of
       'a':  // --account
       begin
         Account := OptArg;
         if Account = '' then
+          Error := ERROR_INVALID_PARAMETER;
+      end;
+      'c':  // --computername
+      begin
+        ComputerName := OptArg;
+        if ComputerName = '' then
           Error := ERROR_INVALID_PARAMETER;
       end;
       'd':  // --displayname
@@ -359,12 +374,15 @@ begin
     EnumPrivileges(Privileges);
     for I := 0 to Length(Privileges) - 1 do
     begin
-      RC := EnumPrivilegeAccounts('', Privileges[I], Accounts);
+      RC := EnumPrivilegeAccounts(CmdLine.ComputerName, Privileges[I], Accounts);
       if RC = ERROR_SUCCESS then
       begin
         GetPrivilegeDisplayName(Privileges[I], PrivilegeDisplayName);
         for J := 0 to Length(Accounts) - 1 do
-          WriteLn('"', Accounts[J], '","', Privileges[I], '","', PrivilegeDisplayName, '"');
+          WriteLn('"', CmdLine.ComputerName, '","',
+          Accounts[J], '","',
+          Privileges[I], '","',
+          PrivilegeDisplayName, '"');
       end;
     end;
     ExitCode := Integer(RC);
@@ -376,7 +394,7 @@ begin
   // LsaEnumerateAccountRights
   if List in CmdLine.ParamSet then
   begin
-    RC := EnumAccountPrivileges('', CmdLine.Account, Privileges);
+    RC := EnumAccountPrivileges(CmdLine.ComputerName, CmdLine.Account, Privileges);
     if RC = 0 then
     begin
       for I := 0 to Length(Privileges) - 1 do
@@ -391,8 +409,8 @@ begin
   // LsaEnumerateAccountsWithUserRight
   if PrivilegeAccounts in CmdLine.ParamSet then
   begin
-    RC := EnumPrivilegeAccounts('', CmdLine.Privilege, Accounts);
-    if RC = 0 then
+    RC := EnumPrivilegeAccounts(CmdLine.ComputerName, CmdLine.Privilege, Accounts);
+    if RC = ERROR_SUCCESS then
     begin
       for I := 0 to Length(Accounts) - 1 do
         WriteLn(Accounts[I]);
@@ -411,8 +429,8 @@ begin
 
   if Test in CmdLine.ParamSet then
   begin
-    RC := TestAccountPrivileges('', CmdLine.Account, CmdLine.Privileges, HasPrivileges);
-    if RC <> 0 then
+    RC := TestAccountPrivileges(CmdLine.ComputerName, CmdLine.Account, CmdLine.Privileges, HasPrivileges);
+    if RC <> ERROR_SUCCESS then
     begin
       begin
         if not CmdLine.Quiet then
@@ -438,11 +456,11 @@ begin
   // LsaAddAccountRights
   if Grant in CmdLine.ParamSet then
   begin
-    RC := AddAccountPrivileges('', CmdLine.Account, CmdLine.Privileges);
+    RC := AddAccountPrivileges(CmdLine.ComputerName, CmdLine.Account, CmdLine.Privileges);
     ExitCode := Integer(RC);
     if not CmdLine.Quiet then
     begin
-      if RC = 0 then
+      if RC = ERROR_SUCCESS then
         WriteLn(GetWindowsMessage(0))
       else
         WriteLn(GetWindowsMessage(RC, true));
@@ -453,11 +471,11 @@ begin
   // LsaRemoveAccountRights
   if Revoke in CmdLine.ParamSet then
   begin
-    RC := RemoveAccountPrivileges('', CmdLine.Account, CmdLine.Privileges);
+    RC := RemoveAccountPrivileges(CmdLine.ComputerName, CmdLine.Account, CmdLine.Privileges);
     ExitCode := Integer(RC);
     if not CmdLine.Quiet then
     begin
-      if RC = 0 then
+      if RC = ERROR_SUCCESS then
         WriteLn(GetWindowsMessage(0))
       else
         WriteLn(GetWindowsMessage(RC, true));
@@ -467,15 +485,15 @@ begin
 
   if RevokeAll in CmdLine.ParamSet then
   begin
-    RC := EnumAccountPrivileges('', CmdLine.Account, Privileges);
-    if RC = 0 then
+    RC := EnumAccountPrivileges(CmdLine.ComputerName, CmdLine.Account, Privileges);
+    if RC = ERROR_SUCCESS then
     begin
-      RC := RemoveAccountPrivileges('', CmdLine.Account, Privileges);
+      RC := RemoveAccountPrivileges(CmdLine.ComputerName, CmdLine.Account, Privileges);
     end;
     ExitCode := Integer(RC);
     if not CmdLine.Quiet then
     begin
-      if RC = 0 then
+      if RC = ERROR_SUCCESS then
         WriteLn(GetWindowsMessage(0))
       else
         WriteLn(GetWindowsMessage(RC, true));

@@ -430,7 +430,8 @@ begin
 end;
 
 // IMPORTANT: Caller must use LocalFree on retrieved SID structure when done
-function GetAccountSid(const AccountName: string; out pSecurityID: PSID): DWORD;
+function GetAccountSid(const ComputerName, AccountName: string;
+  out pSecurityID: PSID): DWORD;
 var
   SidSize, AuthorityLength: DWORD;
   SidType: SID_NAME_USE;
@@ -440,13 +441,13 @@ begin
   SidSize := 0;
   AuthorityLength := 0;
   // Get sizes
-  LookupAccountNameW(nil,  // LPCWSTR       lpSystemName
-    PChar(AccountName),    // LPCWSTR       lpAccountName
-    nil,                   // PSID          Sid
-    SidSize,               // LPDWORD       cbSid
-    nil,                   // LPWSTR        ReferencedDomainName
-    AuthorityLength,       // LPDWORD       cchReferencedDomainName
-    SidType);              // PSID_NAME_USE peUse
+  LookupAccountNameW(PChar(ComputerName),  // LPCWSTR       lpSystemName
+    PChar(AccountName),                    // LPCWSTR       lpAccountName
+    nil,                                   // PSID          Sid
+    SidSize,                               // LPDWORD       cbSid
+    nil,                                   // LPWSTR        ReferencedDomainName
+    AuthorityLength,                       // LPDWORD       cchReferencedDomainName
+    SidType);                              // PSID_NAME_USE peUse
   result := GetLastError();
   case result of
     ERROR_INSUFFICIENT_BUFFER:
@@ -457,13 +458,13 @@ begin
         SidSize));                                // SIZE_T uBytes
       AuthorityLength := AuthorityLength * SizeOf(Char);
       GetMem(pAuthorityName, AuthorityLength);
-      if not LookupAccountNameW(nil,  // LPCWSTR       lpSystemName
-        PChar(AccountName),           // LPCWSTR       lpAccountName
-        pSecurityID,                  // PSID          Sid
-        SidSize,                      // LPDWORD       cbSid
-        pAuthorityName,               // LPWSTR        ReferencedDomainName
-        AuthorityLength,              // LPDWORD       cchReferencedDomainName
-        SidType) then                 // PSID_NAME_USE peUse
+      if not LookupAccountNameW(PChar(ComputerName),  // LPCWSTR       lpSystemName
+        PChar(AccountName),                           // LPCWSTR       lpAccountName
+        pSecurityID,                                  // PSID          Sid
+        SidSize,                                      // LPDWORD       cbSid
+        pAuthorityName,                               // LPWSTR        ReferencedDomainName
+        AuthorityLength,                              // LPDWORD       cchReferencedDomainName
+        SidType) then                                 // PSID_NAME_USE peUse
       begin
         result := GetLastError();
         LocalFree(HLOCAL(pSecurityID));  // HLOCAL hMem
@@ -476,16 +477,14 @@ begin
       if ConvertStringSidToSidW(PChar(AccountName),  // LPCWSTR StringSid
         pSecurityID) then                            // PSID    *Sid
       begin
-        result := ERROR_SUCCESS
-      end
-      else
-        // If failed, return ERROR_NONE_MAPPED
-        result := ERROR_NONE_MAPPED;
+        result := ERROR_SUCCESS;
+      end;
     end;
   end;
 end;
 
-function GetAccountName(const pSecurityID: PSID; out AccountName: string): DWORD;
+function GetAccountName(const ComputerName: string; const pSecurityID: PSID;
+  out AccountName: string): DWORD;
 var
   AccountNameLength, AuthorityNameLength: DWORD;
   pAccountName, pAuthorityName: PChar;
@@ -494,26 +493,26 @@ begin
   result := ERROR_SUCCESS;
   AccountNameLength := 0;
   AuthorityNameLength := 0;
-  LookupAccountSidW(nil,  // LPCWSTR       lpSystemName
-    pSecurityID,          // PSID          Sid
-    nil,                  // LPWSTR        Name
-    AccountNameLength,    // LPDWORD       cchName
-    nil,                  // LPWSTR        ReferencedDomainName
-    AuthorityNameLength,  // LPDWORD       cchReferencedDomainName
-    SidType);             // PSID_NAME_USE peUse
+  LookupAccountSidW(PChar(ComputerName),  // LPCWSTR       lpSystemName
+    pSecurityID,                          // PSID          Sid
+    nil,                                  // LPWSTR        Name
+    AccountNameLength,                    // LPDWORD       cchName
+    nil,                                  // LPWSTR        ReferencedDomainName
+    AuthorityNameLength,                  // LPDWORD       cchReferencedDomainName
+    SidType);                             // PSID_NAME_USE peUse
   result := GetLastError();
   if result <> ERROR_INSUFFICIENT_BUFFER then
     exit;
   result := ERROR_SUCCESS;
   GetMem(pAccountName, AccountNameLength * SizeOf(Char));
   GetMem(pAuthorityName, AuthorityNameLength * SizeOf(Char));
-  if LookupAccountSidW(nil,  // LPCWSTR       lpSystemName
-       pSecurityID,          // PSID          Sid
-       pAccountName,         // LPWSTR        Name
-       AccountNameLength,    // LPDWORD       cchName
-       pAuthorityName,       // LPWSTR        ReferencedDomainName
-       AuthorityNameLength,  // LPDWORD       cchReferencedDomainName
-       SidType) then         // PSID_NAME_USE peUse
+  if LookupAccountSidW(PChar(ComputerName),  // LPCWSTR       lpSystemName
+       pSecurityID,                          // PSID          Sid
+       pAccountName,                         // LPWSTR        Name
+       AccountNameLength,                    // LPDWORD       cchName
+       pAuthorityName,                       // LPWSTR        ReferencedDomainName
+       AuthorityNameLength,                  // LPDWORD       cchReferencedDomainName
+       SidType) then                         // PSID_NAME_USE peUse
   begin
     if string(pAuthorityName) <> '' then
       AccountName := string(pAuthorityName) + '\' + string(pAccountName)
@@ -574,7 +573,7 @@ end;
 
 function CloseLsaPolicy(const LsaPolicyHandle: LSA_HANDLE): DWORD;
 begin
-  result := LsaClose(LsaPolicyHandle);
+  result := LsaClose(LsaPolicyHandle);  // LSA_HANDLE ObjectHandle
   if result <> STATUS_SUCCESS then
     result := LsaNtStatusToWinError(result);
 end;
@@ -594,7 +593,7 @@ begin
   if result <> 0 then
     exit;
 
-  result := GetAccountSid(AccountName, pSecurityID);
+  result := GetAccountSid(ComputerName, AccountName, pSecurityID);
   if result <> 0 then
     exit;
 
@@ -602,25 +601,31 @@ begin
   for I := 0 to Length(Privileges) - 1 do
   begin
     if not InitLsaString(Privileges[I], LsaString) then
-      exit(ERROR_INSUFFICIENT_BUFFER);
+    begin
+      result := ERROR_INSUFFICIENT_BUFFER;
+      break;
+    end;
     Privs[I] := LsaString;
   end;
 
-  case Action of
-    Add:
-    begin
-      result := LsaAddAccountRights(LsaHandle,  // LSA_HANDLE          PolicyHandle
-        pSecurityID,                            // PSID                AccountSid
-        @Privs[0],                              // PLSA_UNICODE_STRING UserRights
-        Length(Privs));                         // ULONG               CountOfRights
-    end;
-    Remove:
-    begin
-      result := LsaRemoveAccountRights(LsaHandle,  // LSA_HANDLE          PolicyHandle
-        pSecurityID,                               // PSID                AccountSid
-        false,                                     // BOOLEAN             AllRights
-        @Privs[0],                                 // PLSA_UNICODE_STRING UserRights
-        Length(Privs));                            // ULONG               CountOfRights
+  if result = STATUS_SUCCESS then
+  begin
+    case Action of
+      Add:
+      begin
+        result := LsaAddAccountRights(LsaHandle,  // LSA_HANDLE          PolicyHandle
+          pSecurityID,                            // PSID                AccountSid
+          @Privs[0],                              // PLSA_UNICODE_STRING UserRights
+          Length(Privs));                         // ULONG               CountOfRights
+      end;
+      Remove:
+      begin
+        result := LsaRemoveAccountRights(LsaHandle,  // LSA_HANDLE          PolicyHandle
+          pSecurityID,                               // PSID                AccountSid
+          false,                                     // BOOLEAN             AllRights
+          @Privs[0],                                 // PLSA_UNICODE_STRING UserRights
+          Length(Privs));                            // ULONG               CountOfRights
+      end;
     end;
   end;
 
@@ -662,7 +667,7 @@ begin
   result := OpenLsaPolicy(ComputerName, AccessMask, LsaHandle);
   if result <> 0 then
     exit;
-  result := GetAccountSid(AccountName, pSecurityID);
+  result := GetAccountSid(ComputerName, AccountName, pSecurityID);
   if result <> 0 then
     exit;
 
@@ -719,7 +724,7 @@ begin
     begin
       for J := 0 to Length(AccountPrivs) - 1 do
       begin
-        if Privilege = AccountPrivs[I] then
+        if Privilege = AccountPrivs[J] then
         begin
           Inc(NumMatches);
           break;
@@ -765,7 +770,7 @@ begin
       pBufEntry := pBuf;
       for I := 0 to Count - 1 do
       begin
-        if GetAccountName(pBufEntry^.Sid, AccountName) <> 0 then
+        if GetAccountName(ComputerName, pBufEntry^.Sid, AccountName) <> 0 then
           AccountName := SidToString(pBufEntry^.Sid);
         Accounts[I] := AccountName;
         Inc(pBufEntry);
