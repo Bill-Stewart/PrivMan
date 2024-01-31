@@ -1,5 +1,9 @@
 # PrivMan Version History
 
+## 1.0.1 (2024-01-31)
+
+* Corrected bug in privilege management code to prevent potential buffer overflow.
+
 ## 1.0.0 (2024-01-31)
 
 * Updated privilege management code to improve readability and prevent a couple of possible handle leaks.

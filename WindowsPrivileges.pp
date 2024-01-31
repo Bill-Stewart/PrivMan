@@ -544,9 +544,11 @@ end;
 function InitLsaString(const S: string; out LsaString: LSA_UNICODE_STRING): DWORD;
 begin
   if Length(S) > (High(USHORT) div SizeOf(Char)) - 1 then
-    result := ERROR_INSUFFICIENT_BUFFER  // string is too long
-  else
-    result := ERROR_SUCCESS;
+  begin
+    result := ERROR_INSUFFICIENT_BUFFER;  // string is too long
+    exit;
+  end;
+  result := ERROR_SUCCESS;
   LsaString.Length := Length(S) * SizeOf(Char);
   LsaString.MaximumLength := (Length(S) + 1) * SizeOf(Char);
   LsaString.Buffer := PChar(S);
