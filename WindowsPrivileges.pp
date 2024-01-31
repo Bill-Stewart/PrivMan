@@ -540,18 +540,16 @@ begin
   end;
 end;
 
-function InitLsaString(const S: string; out LsaString: LSA_UNICODE_STRING): Boolean;
-const
-  MAX_LSASTR_BUFLEN = High(USHORT) div SizeOf(Char);
+// Initializes a LSA_UNICODE_STRING structure from a string
+function InitLsaString(const S: string; out LsaString: LSA_UNICODE_STRING): DWORD;
 begin
-  result := Length(S) < MAX_LSASTR_BUFLEN;
-  if result then
-  begin
-    FillChar(LsaString, SizeOf(LsaString), 0);
-    LsaString.Length := Length(S) * SizeOf(Char);
-    LsaString.MaximumLength := MAX_LSASTR_BUFLEN;
-    LsaString.Buffer := PChar(S);
-  end;
+  if Length(S) > (High(USHORT) div SizeOf(Char)) - 1 then
+    result := ERROR_INSUFFICIENT_BUFFER  // string is too long
+  else
+    result := ERROR_SUCCESS;
+  LsaString.Length := Length(S) * SizeOf(Char);
+  LsaString.MaximumLength := (Length(S) + 1) * SizeOf(Char);
+  LsaString.Buffer := PChar(S);
 end;
 
 function OpenLsaPolicy(const ComputerName: string; const AccessMask: ACCESS_MASK;
@@ -560,22 +558,23 @@ var
   SystemName: LSA_UNICODE_STRING;
   ObjectAttributes: LSA_OBJECT_ATTRIBUTES;
 begin
-  if not InitLsaString(ComputerName, SystemName) then
-    exit(ERROR_INSUFFICIENT_BUFFER);
+  result := InitLsaString(ComputerName, SystemName);
+  if result <> ERROR_SUCCESS then
+    exit;
   FillChar(ObjectAttributes, SizeOf(ObjectAttributes), 0);
-  result := LsaOpenPolicy(SystemName,  // PLSA_UNICODE_STRING    SystemName,
+  result := LsaOpenPolicy(SystemName,  // PLSA_UNICODE_STRING    SystemName
     ObjectAttributes,                  // PLSA_OBJECT_ATTRIBUTES ObjectAttributes
     AccessMask,                        // ACCESS_MASK            DesiredAccess
     LsaPolicyHandle);                  // PLSA_HANDLE            PolicyHandle
   if result <> STATUS_SUCCESS then
-    result := LsaNtStatusToWinError(result);
+    result := LsaNtStatusToWinError(result);  // NTSTATUS Status
 end;
 
 function CloseLsaPolicy(const LsaPolicyHandle: LSA_HANDLE): DWORD;
 begin
   result := LsaClose(LsaPolicyHandle);  // LSA_HANDLE ObjectHandle
   if result <> STATUS_SUCCESS then
-    result := LsaNtStatusToWinError(result);
+    result := LsaNtStatusToWinError(result);  // NTSTATUS Status
 end;
 
 function ChangePrivileges(const Action: TPrivilegeAction;
@@ -588,52 +587,48 @@ var
   Privs: TLSAUnicodeStringArray;
   LsaString: LSA_UNICODE_STRING;
 begin
+  result := GetAccountSid(ComputerName, AccountName, pSecurityID);
+  if result <> ERROR_SUCCESS then
+    exit;
+
   AccessMask := POLICY_ALL_ACCESS;
   result := OpenLsaPolicy(ComputerName, AccessMask, LsaHandle);
-  if result <> 0 then
-    exit;
-
-  result := GetAccountSid(ComputerName, AccountName, pSecurityID);
-  if result <> 0 then
-    exit;
-
-  SetLength(Privs, Length(Privileges));
-  for I := 0 to Length(Privileges) - 1 do
+  if result = ERROR_SUCCESS then
   begin
-    if not InitLsaString(Privileges[I], LsaString) then
+    SetLength(Privs, Length(Privileges));
+    for I := 0 to Length(Privileges) - 1 do
     begin
-      result := ERROR_INSUFFICIENT_BUFFER;
-      break;
+      result := InitLsaString(Privileges[I], LsaString);
+      if result <> ERROR_SUCCESS then
+        break;
+      Privs[I] := LsaString;
     end;
-    Privs[I] := LsaString;
-  end;
-
-  if result = STATUS_SUCCESS then
-  begin
-    case Action of
-      Add:
-      begin
-        result := LsaAddAccountRights(LsaHandle,  // LSA_HANDLE          PolicyHandle
-          pSecurityID,                            // PSID                AccountSid
-          @Privs[0],                              // PLSA_UNICODE_STRING UserRights
-          Length(Privs));                         // ULONG               CountOfRights
+    if result = ERROR_SUCCESS then
+    begin
+      case Action of
+        Add:
+        begin
+          result := LsaAddAccountRights(LsaHandle,  // LSA_HANDLE          PolicyHandle
+            pSecurityID,                            // PSID                AccountSid
+            @Privs[0],                              // PLSA_UNICODE_STRING UserRights
+            Length(Privs));                         // ULONG               CountOfRights
+        end;
+        Remove:
+        begin
+          result := LsaRemoveAccountRights(LsaHandle,  // LSA_HANDLE          PolicyHandle
+            pSecurityID,                               // PSID                AccountSid
+            false,                                     // BOOLEAN             AllRights
+            @Privs[0],                                 // PLSA_UNICODE_STRING UserRights
+            Length(Privs));                            // ULONG               CountOfRights
+        end;
       end;
-      Remove:
-      begin
-        result := LsaRemoveAccountRights(LsaHandle,  // LSA_HANDLE          PolicyHandle
-          pSecurityID,                               // PSID                AccountSid
-          false,                                     // BOOLEAN             AllRights
-          @Privs[0],                                 // PLSA_UNICODE_STRING UserRights
-          Length(Privs));                            // ULONG               CountOfRights
-      end;
+      if result <> STATUS_SUCCESS then
+        result := LsaNtStatusToWinError(result);  // NTSTATUS Status
     end;
+    CloseLsaPolicy(LsaHandle);
   end;
-
-  if result <> STATUS_SUCCESS then
-    result := LsaNtStatusToWinError(result);
 
   LocalFree(HLOCAL(pSecurityID));  // HLOCAL hMem
-  CloseLsaPolicy(LsaHandle);
 end;
 
 function AddAccountPrivileges(const ComputerName, AccountName: string;
@@ -657,49 +652,54 @@ end;
 function EnumAccountPrivileges(const ComputerName, AccountName: string;
   out Privileges: TStringArray): DWORD;
 var
+  pSecurityID: PSID;
   AccessMask: ACCESS_MASK;
   LsaHandle: LSA_HANDLE;
-  pSecurityID: PSID;
   pPrivileges, pPrivilege: PLSA_UNICODE_STRING;
   Count, I: ULONG;
 begin
+  result := GetAccountSid(ComputerName, AccountName, pSecurityID);
+  if result <> ERROR_SUCCESS then
+    exit;
+
   AccessMask := POLICY_LOOKUP_NAMES;
   result := OpenLsaPolicy(ComputerName, AccessMask, LsaHandle);
-  if result <> 0 then
-    exit;
-  result := GetAccountSid(ComputerName, AccountName, pSecurityID);
-  if result <> 0 then
-    exit;
-
-  result := LsaEnumerateAccountRights(LsaHandle,  // LSA_HANDLE          PolicyHandle
-    pSecurityID,                                  // PSID                AccountSid
-    pPrivileges,                                  // PLSA_UNICODE_STRING *UserRights
-    Count);                                       // PULONG              CountOfRights
-  case result of
-    STATUS_OBJECT_NAME_NOT_FOUND:
-    begin
-      // Nothing assigned
-      result := STATUS_SUCCESS;
-      SetLength(Privileges, 0);
-    end;
-    STATUS_SUCCESS:
-    begin
-      SetLength(Privileges, Count);
-      pPrivilege := pPrivileges;
-      for I := 0 to Count - 1 do
+  if result = ERROR_SUCCESS then
+  begin
+    result := LsaEnumerateAccountRights(LsaHandle,  // LSA_HANDLE          PolicyHandle
+      pSecurityID,                                  // PSID                AccountSid
+      pPrivileges,                                  // PLSA_UNICODE_STRING *UserRights
+      Count);                                       // PULONG              CountOfRights
+    case result of
+      STATUS_OBJECT_NAME_NOT_FOUND:
       begin
-        Privileges[I] := string(pPrivilege^.Buffer);
-        Inc(pPrivilege);
+        // No assignments = not an error
+        result := STATUS_SUCCESS;
+        SetLength(Privileges, 0);
+      end;
+      STATUS_SUCCESS:
+      begin
+        SetLength(Privileges, Count);
+        pPrivilege := pPrivileges;
+        for I := 0 to Count - 1 do
+        begin
+          // Why SetLength and Move? MSDN doc page for LSA_UNICODE_STRING says
+          // "Note that the strings returned by the various LSA functions might
+          // not be null-terminated." Based on this comment, we'll use the
+          // Length member and copy the string rather than cast.
+          SetLength(Privileges[I], pPrivilege^.Length div SizeOf(Char));
+          Move(pPrivilege^.Buffer^, Privileges[I][1], pPrivilege^.Length);
+          Inc(pPrivilege);
+        end;
       end;
     end;
+    if result <> STATUS_SUCCESS then
+      result := LsaNtStatusToWinError(result);  // NTSTATUS Status
+    LsaFreeMemory(pPrivileges);  // PVOID Buffer
+    CloseLsaPolicy(LsaHandle);
   end;
-  LsaFreeMemory(pPrivileges);
-
-  if result <> STATUS_SUCCESS then
-    result := LsaNtStatusToWinError(result);
 
   LocalFree(HLOCAL(pSecurityID));  // HLOCAL hMem
-  CloseLsaPolicy(LsaHandle);
 end;
 
 function TestAccountPrivileges(const ComputerName, AccountName: string;
@@ -720,7 +720,8 @@ begin
   NumMatches := 0;
   for I := 0 to Length(Privileges) - 1 do
   begin
-    if GetPrivilegeName(Privileges[I], Privilege) = 0 then
+    result := GetPrivilegeName(Privileges[I], Privilege);
+    if result = 0 then
     begin
       for J := 0 to Length(AccountPrivs) - 1 do
       begin
@@ -730,9 +731,12 @@ begin
           break;
         end;
       end;
-    end;
+    end
+    else
+      break;
   end;
-  HasPrivileges := NumMatches = Length(Privileges);
+  if result = 0 then
+    HasPrivileges := NumMatches = Length(Privileges);
 end;
 
 function EnumPrivilegeAccounts(ComputerName, PrivilegeName: string;
@@ -748,39 +752,40 @@ var
 begin
   AccessMask := POLICY_LOOKUP_NAMES or POLICY_VIEW_LOCAL_INFORMATION;
   result := OpenLsaPolicy(ComputerName, AccessMask, LsaHandle);
-  if result <> 0 then
+  if result <> ERROR_SUCCESS then
     exit;
-  if not InitLsaString(PrivilegeName, LsaString) then
-    exit(ERROR_INSUFFICIENT_BUFFER);
 
-  result := LsaEnumerateAccountsWithUserRight(LsaHandle,  // LSA_HANDLE          PolicyHandle
-    @LsaString,                                           // PLSA_UNICODE_STRING UserRight,
-    pBuf,                                                 // PVOID               *Buffer
-    Count);                                               // PULONG              CountReturned
-  case result of
-    STATUS_NO_MORE_ENTRIES:
-    begin
-      // No accounts assigned
-      result := STATUS_SUCCESS;
-      SetLength(Accounts, 0);
-    end;
-    STATUS_SUCCESS:
-    begin
-      SetLength(Accounts, Count);
-      pBufEntry := pBuf;
-      for I := 0 to Count - 1 do
+  result := InitLsaString(PrivilegeName, LsaString);
+  if result = ERROR_SUCCESS then
+  begin
+    result := LsaEnumerateAccountsWithUserRight(LsaHandle,  // LSA_HANDLE          PolicyHandle
+      @LsaString,                                           // PLSA_UNICODE_STRING UserRight,
+      pBuf,                                                 // PVOID               *Buffer
+      Count);                                               // PULONG              CountReturned
+    case result of
+      STATUS_NO_MORE_ENTRIES:
       begin
-        if GetAccountName(ComputerName, pBufEntry^.Sid, AccountName) <> 0 then
-          AccountName := SidToString(pBufEntry^.Sid);
-        Accounts[I] := AccountName;
-        Inc(pBufEntry);
+        // No accounts assigned = not an error
+        result := STATUS_SUCCESS;
+        SetLength(Accounts, 0);
       end;
-      LsaFreeMemory(pBuf);
+      STATUS_SUCCESS:
+      begin
+        SetLength(Accounts, Count);
+        pBufEntry := pBuf;
+        for I := 0 to Count - 1 do
+        begin
+          if GetAccountName(ComputerName, pBufEntry^.Sid, AccountName) <> 0 then
+            AccountName := SidToString(pBufEntry^.Sid);
+          Accounts[I] := AccountName;
+          Inc(pBufEntry);
+        end;
+        LsaFreeMemory(pBuf);  // PVOID Buffer
+      end;
     end;
+    if result <> STATUS_SUCCESS then
+      result := LsaNtStatusToWinError(result);  // NTSTATUS Status
   end;
-
-  if result <> STATUS_SUCCESS then
-    result := LsaNtStatusToWinError(result);
 
   CloseLsaPolicy(LsaHandle);
 end;

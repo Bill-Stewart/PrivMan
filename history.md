@@ -1,5 +1,11 @@
 # PrivMan Version History
 
+## 1.0.0 (2024-01-31)
+
+* Updated privilege management code to improve readability and prevent a couple of possible handle leaks.
+
+* Minor tweaks.
+
 ## 0.0.7 (2024-01-22)
 
 * Added `-c` option to connect to a remote computer.

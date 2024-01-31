@@ -446,9 +446,9 @@ begin
     if not CmdLine.Quiet then
     begin
       if ExitCode = 1 then
-        WriteLn('Account has all specified privileges/rights')
+        WriteLn('Account has all specified privileges/rights.')
       else
-        WriteLn('Account does not have all specified privileges/rights');
+        WriteLn('Account does not have all specified privileges/rights.');
     end;
     exit;
   end;
