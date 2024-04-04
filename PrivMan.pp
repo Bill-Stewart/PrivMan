@@ -28,6 +28,7 @@ program PrivMan;
 {$R *.res}
 
 // wargcv and wgetopts: https://github.com/Bill-Stewart/wargcv
+// WindowsMessages: https://github.com/Bill-Stewart/WindowsMessages/
 uses
   windows,
   wargcv,

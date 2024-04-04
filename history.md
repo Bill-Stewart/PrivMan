@@ -1,5 +1,11 @@
 # PrivMan Version History
 
+## 1.0.2 (2024-04-04)
+
+* Forgot to include MiscUtil.pp unit in source; fixed.
+
+* Use WindowsMessage.pp from https://https://github.com/Bill-Stewart/WindowsMessages/
+
 ## 1.0.1 (2024-01-31)
 
 * Corrected bug in privilege management code to prevent potential buffer overflow.
